@@ -1,0 +1,42 @@
+# 压测档：把容器压回「4C8G 等效」。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.limit.yml up -d
+#
+# 为什么需要它：开发档给 Docker 分了 10GB，图的是改代码时不用为几百 MB 抠来抠去。
+# 但需求的硬约束是 4C8G，AC-5 的数据必须在这个约束下产生，否则压出来不算数。
+#
+# 配平：CPU 合计 4.0 核，内存合计 ≈ 6.9 GB（8G 机器上留 ~1.1G 给 OS）。
+# 注意：这是 cgroup 模拟，不是真的 4C8G 机器——IO 调度、NUMA、缓存层级都不同，
+# 压测报告里必须标注这一点。
+services:
+  mysql:
+    mem_limit: 2g
+    cpus: 1.4
+
+  app:
+    mem_limit: 2g
+    cpus: 1.4
+    environment:
+      # 压测专用：关掉按 IP 限流。
+      # k6 从同一个容器 IP 发压，按 IP 200/s 的限制会让 84% 的请求变成 429——
+      # 那是限流器在正常工作，不是在测系统容量。真实流量来自大量不同 IP，
+      # 所以压测时按 IP 限流应视为"分布式客户端"，不予触发。
+      # **全局限流保留**（8000/s），它才是这条保险丝本身。
+      SPRING_APPLICATION_JSON: '{"shortlink":{"rate-limit":{"per-ip-per-second":1000000}}}'
+
+  redis:
+    mem_limit: 1200m
+    cpus: 0.4
+
+  counters:
+    mem_limit: 400m
+    cpus: 0.3
+
+  rocketmq-namesrv:
+    mem_limit: 400m
+    cpus: 0.2
+
+  rocketmq-broker:
+    mem_limit: 1200m
+    cpus: 0.3

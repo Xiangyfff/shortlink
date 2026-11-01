@@ -1,0 +1,10 @@
+# A/B 归因专用：关掉统计事件发送，跳转变成纯读路径。
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.limit.yml -f docker-compose.ab-off.yml up -d
+#
+# 注意：SPRING_APPLICATION_JSON 是整串覆盖的，所以这里要把 limit.yml 里的
+# rate-limit 一起带上，否则按 IP 限流会重新生效，压测又会被 429 淹没。
+services:
+  app:
+    environment:
+      SPRING_APPLICATION_JSON: '{"shortlink":{"rate-limit":{"per-ip-per-second":1000000},"stats":{"enabled":false}}}'

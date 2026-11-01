@@ -1,0 +1,11 @@
+# E 组：生产者**启动**（RocketMQ 客户端线程全部在跑），但 publish() 直接返回，不入队。
+# 目的：把"客户端存在"和"我们的入队+序列化"切开。
+#   B  全关(客户端不存在)      = 60%
+#   D  生产者开+消费者关+入队  = 141%
+#   E  生产者开+消费者关+不入队 = ?
+# 若 E ≈ 141% → 成本是 RocketMQ 客户端在应用进程内的存在本身（后台线程/连接）
+# 若 E ≈ 60-70% → 成本是我们自己的入队与序列化
+services:
+  app:
+    environment:
+      SPRING_APPLICATION_JSON: '{"shortlink":{"rate-limit":{"per-ip-per-second":1000000},"stats":{"enabled":true,"consumerEnabled":false,"enqueueEnabled":false}}}'

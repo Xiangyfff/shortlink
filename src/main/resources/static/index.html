@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>短链服务</title>
+    <!-- Vue 自托管：不走 CDN，页面能打开就一定加载得到 -->
+    <script src="/vendor/vue.global.prod.js"></script>
+    <style>
+        :root {
+            --bg: #f7f7f8;
+            --card: #ffffff;
+            --line: #e3e3e8;
+            --text: #1c1c1e;
+            --muted: #6b6b76;
+            --accent: #2f6feb;
+            --danger: #c0392b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 40px 20px;
+            background: var(--bg);
+            color: var(--text);
+            font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+        }
+
+        .wrap { max-width: 720px; margin: 0 auto; }
+
+        h1 { font-size: 22px; margin: 0 0 4px; }
+        .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card h2 { font-size: 14px; margin: 0 0 14px; color: var(--muted); font-weight: 600; }
+
+        label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+        input {
+            width: 100%;
+            padding: 9px 11px;
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            font-size: 14px;
+            font-family: inherit;
+            margin-bottom: 14px;
+            background: #fff;
+        }
+
+        input:focus { outline: 2px solid #cfe0ff; border-color: var(--accent); }
+
+        button {
+            padding: 9px 18px;
+            border: none;
+            border-radius: 7px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 14px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        button:disabled { opacity: .5; cursor: default; }
+        button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+
+        .row { display: flex; gap: 10px; align-items: center; }
+        .row input { margin-bottom: 0; }
+
+        .result {
+            margin-top: 16px;
+            padding: 12px 14px;
+            background: #f2f7ff;
+            border: 1px solid #d6e4ff;
+            border-radius: 7px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .result code { font-size: 14px; word-break: break-all; }
+
+        .err { color: var(--danger); font-size: 13px; margin-top: 10px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+        th { color: var(--muted); font-weight: 500; font-size: 13px; }
+        td.num { font-variant-numeric: tabular-nums; }
+
+        .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+
+        .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+        ul.history { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+        ul.history li {
+            display: flex; justify-content: space-between; gap: 12px;
+            padding: 6px 0; border-bottom: 1px solid var(--line);
+        }
+        ul.history li:last-child { border-bottom: none; }
+        ul.history span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body>
+<div id="app" class="wrap">
+    <h1>短链服务</h1>
+    <div class="sub">创建 · 跳转 · 统计　|　4C8G 单机约束</div>
+
+    <div class="card">
+        <h2>创建短链</h2>
+        <label>长 URL</label>
+        <input v-model="longUrl" placeholder="https://example.com/some/very/long/path?x=1" @keyup.enter="create">
+        <label>有效期（留空 = 永久）</label>
+        <input type="datetime-local" v-model="expiresAt">
+        <button :disabled="creating || !longUrl" @click="create">{{ creating ? '生成中…' : '生成短链' }}</button>
+
+        <div class="result" v-if="created">
+            <code>{{ created.shortUrl }}</code>
+            <button class="ghost" @click="copy(created.shortUrl)">{{ copied ? '已复制' : '复制' }}</button>
+        </div>
+        <div class="err" v-if="error">{{ error }}</div>
+    </div>
+
+    <div class="card">
+        <h2>查询统计</h2>
+        <div class="row">
+            <input v-model="code" placeholder="输入短码，例如 aB3xY9z" @keyup.enter="query">
+            <button :disabled="loading || !code" @click="query">{{ loading ? '查询中…' : '查询' }}</button>
+        </div>
+
+        <table v-if="days.length" style="margin-top:16px">
+            <thead>
+            <tr><th>日期</th><th>PV</th><th>UV</th></tr>
+            </thead>
+            <tbody>
+            <tr v-for="d in days" :key="d.statDate">
+                <td>{{ d.statDate }}</td>
+                <td class="num">{{ d.pv }}</td>
+                <td class="num">{{ d.uv }}</td>
+            </tr>
+            </tbody>
+        </table>
+        <div class="empty" v-else-if="queried">这个短码还没有统计数据（或不存在）。</div>
+        <div class="hint" v-if="days.length">
+            PV 来自访问明细，精确；UV 用 HyperLogLog 估算，误差 ≤0.81%。
+        </div>
+    </div>
+
+    <div class="card" v-if="history.length">
+        <h2>本次会话创建的短链</h2>
+        <ul class="history">
+            <li v-for="h in history" :key="h.code">
+                <strong>{{ h.code }}</strong>
+                <span>{{ h.url }}</span>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref } = Vue;
+
+    createApp({
+        setup() {
+            const longUrl = ref('');
+            const expiresAt = ref('');
+            const creating = ref(false);
+            const created = ref(null);
+            const error = ref('');
+            const copied = ref(false);
+            const history = ref([]);
+
+            const code = ref('');
+            const days = ref([]);
+            const loading = ref(false);
+            const queried = ref(false);
+
+            async function create() {
+                if (!longUrl.value) return;
+                creating.value = true;
+                error.value = '';
+                created.value = null;
+                try {
+                    const body = { url: longUrl.value };
+                    if (expiresAt.value) {
+                        body.expiresAt = new Date(expiresAt.value).toISOString();
+                    }
+                    const res = await fetch('/api/links', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        error.value = data.message || ('创建失败（' + res.status + '）');
+                        return;
+                    }
+                    created.value = data;
+                    history.value.unshift(data);
+                    code.value = data.code;
+                } catch (e) {
+                    error.value = '请求失败，请检查服务是否在运行';
+                } finally {
+                    creating.value = false;
+                }
+            }
+
+            async function query() {
+                if (!code.value) return;
+                loading.value = true;
+                days.value = [];
+                try {
+                    const res = await fetch('/api/stats/' + encodeURIComponent(code.value));
+                    const data = await res.json();
+                    days.value = data.days || [];
+                } catch (e) {
+                    days.value = [];
+                } finally {
+                    loading.value = false;
+                    queried.value = true;
+                }
+            }
+
+            async function copy(text) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                } catch (e) {
+                    // 非 https / 旧浏览器下 clipboard 不可用，退回选中
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                copied.value = true;
+                setTimeout(() => (copied.value = false), 1500);
+            }
+
+            return { longUrl, expiresAt, creating, created, error, copied, history,
+                     code, days, loading, queried, create, query, copy };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

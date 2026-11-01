@@ -1,0 +1,198 @@
+# 六个服务。每加一个都必须能回答「它解决了哪个具体问题」，答不出就删。
+#
+# restart: unless-stopped —— 进程崩了、OOM 了要能自己爬起来。
+# 没有这一条，"99.9% 可用性"就只是句口号：容器死了就静静躺着。
+services:
+  mysql:
+    image: ${REGISTRY:-}library/mysql:8.0
+    container_name: shortlink-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: shortlink
+      MYSQL_USER: shortlink
+      MYSQL_PASSWORD: shortlink
+      TZ: Asia/Shanghai
+    command:
+      # 需求 §6 的硬约束：单实例，buffer pool = 1G。不要为了"优化"调大。
+      - --innodb-buffer-pool-size=1G
+      - --max-connections=200
+      - --innodb-flush-log-at-trx-commit=1
+      - --default-time-zone=+08:00
+    ports:
+      # 宿主 3306 已被本机原生 mysqld 占用，这里映射到 13306。
+      # 应用容器之间走 compose 内网（mysql:3306），不依赖这个映射。
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ushortlink", "-pshortlink"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: ${REGISTRY:-}library/redis:7
+    container_name: shortlink-redis
+    restart: unless-stopped
+    command:
+      # 缓存实例：可以淘汰。打满时优雅降级到 DB，而不是让 SET 报 OOM 把跳转打成 500。
+      # 1G 是总预算：缓存 700MB + 计数 300MB（见下面的 counters 服务）。
+      # 注意：命令行必须写成 "--opt value" 两个 token，
+      # Redis 不接受 "--opt=value"（它会把值拼成一个带引号的字符串，报 Bad directive）。
+      - redis-server
+      - --maxmemory
+      - 700mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+    ports:
+      # 宿主 6379 已被本机原生 redis-server 占用，映射到 16379
+      - "${REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  counters:
+    image: ${REGISTRY:-}library/redis:7
+    container_name: shortlink-counters
+    restart: unless-stopped
+    command:
+      # D5：HLL / 计数实例。**绝对不能淘汰**——计数被 LRU 踢掉就是静默少算。
+      # noeviction 打满时会报 OOM，那是显式的、可观测的失败，比静默少算好。
+      # 为什么必须是第二个实例：maxmemory-policy 是实例级配置，
+      # "能淘汰"和"不能淘汰"是相反语义，一个实例装不下。
+      - redis-server
+      - --maxmemory
+      - 300mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "no"
+    ports:
+      - "${COUNTERS_PORT:-16380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rocketmq-namesrv:
+    image: ${REGISTRY:-}apache/rocketmq:5.3.1
+    container_name: shortlink-mq-namesrv
+    restart: unless-stopped
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: -Xms256m -Xmx256m -Xmn128m
+    ports:
+      - "${MQ_NAMESRV_PORT:-19876}:9876"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9876'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  rocketmq-broker:
+    image: ${REGISTRY:-}apache/rocketmq:5.3.1
+    container_name: shortlink-mq-broker
+    restart: unless-stopped
+    command: sh mqbroker -c /home/rocketmq/broker.conf
+    environment:
+      JAVA_OPT_EXT: -Xms512m -Xmx512m -Xmn256m
+    volumes:
+      - ./docker/rocketmq/broker.conf:/home/rocketmq/broker.conf:ro
+    ports:
+      - "10911:10911"
+    depends_on:
+      rocketmq-namesrv:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/10911'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # 一次性初始化容器：把 topic 先建出来。
+  # 不建的话，消费者在 topic 不存在时订阅，要等路由刷新（最多 30 秒）才能收到消息——
+  # 数据不会丢，但首批统计会晚到，违反 NFR-6（≤1 分钟可见）的边界，冷启动体验也差。
+  # 它跑完就退出，不常驻、不占内存。
+  rocketmq-init:
+    image: ${REGISTRY:-}apache/rocketmq:5.3.1
+    container_name: shortlink-mq-init
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        BIN=/home/rocketmq/rocketmq-5.3.1/bin/mqadmin
+        for i in $$(seq 1 40); do
+          if $$BIN updateTopic -n rocketmq-namesrv:9876 -b rocketmq-broker:10911 \
+               -t shortlink_access -r 4 -w 4 2>&1 | grep -q "success"; then
+            echo "topic shortlink_access ready"
+            exit 0
+          fi
+          echo "waiting for broker to register... ($$i)"
+          sleep 3
+        done
+        echo "failed to create topic" >&2
+        exit 1
+    depends_on:
+      rocketmq-broker:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      args:
+        BUILD_IMAGE: ${REGISTRY:-}library/maven:3.9-eclipse-temurin-17
+        RUNTIME_IMAGE: ${REGISTRY:-}library/eclipse-temurin:17-jre
+    container_name: shortlink-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      counters:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_healthy
+      rocketmq-init:
+        condition: service_completed_successfully
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/shortlink?useSSL=false&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: shortlink
+      SPRING_DATASOURCE_PASSWORD: shortlink
+      SPRING_DATA_REDIS_HOST: redis
+      SHORTLINK_COUNTERS_HOST: counters
+      SHORTLINK_COUNTERS_PORT: 6379
+      SHORTLINK_MQ_NAMESRV: rocketmq-namesrv:9876
+      SHORTLINK_BASE_URL: http://localhost:8080
+      # 8G 总预算：MySQL ≈2.0 + Redis ≈1.2 + RocketMQ ≈1.0 + JVM ≈1.8 + OS ≈0.6 ≈ 6.6G
+      JAVA_TOOL_OPTIONS: -Xmx1500m -Xms1500m -XX:+UseZGC -XX:MaxGCPauseMillis=10
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      # 布隆位图快照落在这里。不挂卷的话每次重建容器都要全表重建（16 秒）
+      - app-data:/app/data
+    healthcheck:
+      # 运行镜像里没有 curl/wget，用 bash 的 /dev/tcp 探活，避免为 healthcheck 装包。
+      # 打的是 readiness 组：只把 db/diskSpace 算作必须的，
+      # Redis 挂了不会让这个探针失败（这正是我们想要的降级行为）。
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+
+volumes:
+  mysql-data:
+  app-data:

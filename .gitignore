@@ -1,0 +1,19 @@
+# 构建产物
+target/
+*.jar
+*.original
+
+# 运行期数据（布隆快照等）
+data/
+*.jfr
+
+# 本机配置（含镜像源、端口）。模板见 .env.example
+.env
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 性能测试产物
+scripts/k6/codes.txt

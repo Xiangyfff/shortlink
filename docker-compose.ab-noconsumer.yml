@@ -1,0 +1,12 @@
+# A/B 归因专用：只开生产者、关掉消费者。
+# 目的：把"发送端"和"消费端"的 CPU 成本切开。
+#   A  生产者开 + 消费者开  = 146%
+#   B  生产者关 + 消费者关  =  60%
+#   C  生产者关（stats.enabled=false）
+#   D  本文件：生产者开 + 消费者关
+# 若 D ≈ A，说明成本全在消费端（解析 + JDBC 批量插入 + HLL 写入）；
+# 若 D ≈ B，说明成本全在发送端。
+services:
+  app:
+    environment:
+      SPRING_APPLICATION_JSON: '{"shortlink":{"rate-limit":{"per-ip-per-second":1000000},"stats":{"enabled":true,"consumer-enabled":false}}}'

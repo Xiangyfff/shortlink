@@ -1,0 +1,9 @@
+# JFR 采样专用：D 组配置（生产者开、消费者关、入队开）+ 全程飞行录制。
+# 镜像里没有 jcmd，所以用 dumponexit：压完 docker stop，录制文件自动写到 /app/data。
+services:
+  app:
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -Xmx1500m -Xms1500m -XX:+UseZGC -XX:MaxGCPauseMillis=10
+        -XX:StartFlightRecording=name=bench,settings=profile,filename=/app/data/bench.jfr,dumponexit=true
+      SPRING_APPLICATION_JSON: '{"shortlink":{"rate-limit":{"per-ip-per-second":1000000},"stats":{"enabled":true,"consumerEnabled":false,"enqueueEnabled":true}}}'
