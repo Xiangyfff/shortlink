@@ -66,6 +66,8 @@
             font-size: 14px;
             font-family: inherit;
             cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         button:disabled { opacity: .5; cursor: default; }
@@ -246,6 +248,14 @@
 
             return { longUrl, expiresAt, creating, created, error, copied, history,
                      code, days, loading, queried, create, query, copy };
+        },
+        mounted() {
+            // 支持 /?code=xxx 直接打开统计，方便分享和截图
+            const pre = new URLSearchParams(location.search).get('code');
+            if (pre) {
+                this.code = pre;
+                this.query();
+            }
         }
     }).mount('#app');
 </script>

@@ -58,7 +58,11 @@ app 的 cgroup 配额 = 1.4 核 = 每秒 1400ms CPU
 docker compose up -d --build
 ```
 
-打开 <http://localhost:8080>，有一个演示页面：输入长 URL 生成短链，再按短码查 PV/UV。
+打开 <http://localhost:8080>：
+
+![演示页面](docs/screenshot.png)
+
+输入长 URL 生成短链，再按短码查 PV/UV。
 
 > 页面是单文件静态页（`static/index.html` + 自托管的 `vue.global.prod.js`），**零构建、零额外容器**。
 > Vue 不走 CDN —— 否则访客的 CDN 可达性会决定页面能不能显示，一个白屏的 demo 比朴素的 demo 糟得多。
