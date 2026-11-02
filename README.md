@@ -309,7 +309,6 @@ src/main/resources/static/
   index.html     演示页面（单文件 + Vue 3 自托管）
   vendor/        vue.global.prod.js
 docs/
-  requirements.md  需求（给定）
   decisions.md     决策记录、模块问答、压测数据
   resume/README.md 简历用的项目描述
 scripts/
