@@ -17,3 +17,6 @@ data/
 
 # 鎬ц兘娴嬭瘯浜х墿
 scripts/k6/codes.txt
+
+# 需求文档属于内部资料，不随仓库发布
+docs/requirements.md
