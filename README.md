@@ -35,7 +35,7 @@ app 的 cgroup 配额是 1.4 核，即每秒 1400ms CPU。按 5000 QPS 算，每
 即使去掉统计链路，5000 QPS 也需要应用独占 3.3 核。整机只有 4 核，还要分给 MySQL、两个 Redis 和 RocketMQ。
 
 结论是这套栈（Spring Boot + JVM）在 4C8G 上做 5000 QPS，前提不成立。要真做到只能换更轻的运行时，
-或者把单次响应的开销压到 0.28ms 以内。A/B 拆解过程见 [`docs/decisions.md` §19](docs/decisions.md)。
+或者把单次响应的开销压到 0.28ms 以内。A/B 拆解过程记录在内部决策文档 §19。
 
 ## 快速开始
 
@@ -198,7 +198,7 @@ sequenceDiagram
 
 ## 设计决策
 
-七条决策的选项、代价、取舍理由，以及被推翻过的地方，都在 [`docs/decisions.md`](docs/decisions.md)。
+七条决策的选项、代价、取舍理由，以及被推翻过的地方，记录在内部决策文档中（未随仓库发布）。
 
 | | 决策 | 理由 | 代价 |
 |---|---|---|---|
@@ -253,7 +253,7 @@ Caffeine 的 `recordStats()` 才拿到数据：
 Redis 挂掉时整体 health 会报 DOWN，但 readiness 仍是 UP，容器保持 healthy。
 如果按整体 health 判活，会把自己正在正常降级的容器杀掉。
 
-完整矩阵见 [`docs/decisions.md` §24](docs/decisions.md)。
+完整矩阵见内部决策文档 §24。
 
 ## 压测
 
@@ -278,7 +278,7 @@ docker run --rm --network shortlink-v2_default \
 压测要用压测档。开发档有按 IP 200/s 的限流，k6 从单 IP 发压会让大部分请求变成 429，
 看起来像缓存失效。压测档通过 `SPRING_APPLICATION_JSON` 关掉按 IP 限流，保留全局限流。
 
-A/B 的四组对照见 [`docs/decisions.md` §19](docs/decisions.md)。
+A/B 的四组对照记录在内部决策文档 §19。
 所有数据都来自 cgroup 模拟的 4C8G，和真机在 IO 调度、NUMA、缓存层级上有差别。
 
 ## 已知问题
@@ -309,7 +309,6 @@ src/main/resources/static/
   index.html     演示页面（单文件 + Vue 3 自托管）
   vendor/        vue.global.prod.js
 docs/
-  decisions.md     决策记录、模块问答、压测数据
   resume/README.md 简历用的项目描述
 scripts/
   load-data.sql    1000 万行数据准备
