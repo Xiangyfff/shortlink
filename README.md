@@ -309,7 +309,7 @@ src/main/resources/static/
   index.html     演示页面（单文件 + Vue 3 自托管）
   vendor/        vue.global.prod.js
 docs/
-  resume/README.md 简历用的项目描述
+  screenshot.png   演示页面截图
 scripts/
   load-data.sql    1000 万行数据准备
   k6/              压测脚本
